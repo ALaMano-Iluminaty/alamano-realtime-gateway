@@ -1,3 +1,29 @@
+server:
+  port: 8083
 spring:
   application:
     name: realtime-gateway
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        default-requeue-rejected: false
+alamano:
+  security:
+    jwt-public-key: ${JWT_PUBLIC_KEY_LOCATION:classpath:keys/public.pem}
+  gateway:
+    instance-id: ${HOSTNAME:local}
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost,http://localhost:5173}
+    dedup-capacity: 10000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+logging:
+  structured:
+    format:
+      console: ecs

@@ -1,15 +1,16 @@
 package com.alamano.gateway.security;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 import com.alamano.gateway.events.EventEnvelope;
 import com.alamano.gateway.events.EventRouter;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -23,6 +24,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.messaging.converter.MappingJackson2MessageConverter;
+import org.springframework.messaging.simp.stomp.ConnectionLostException;
 import org.springframework.messaging.simp.stomp.StompFrameHandler;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaders;
@@ -38,12 +40,17 @@ import org.springframework.web.socket.messaging.WebSocketStompClient;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {"spring.rabbitmq.listener.simple.auto-startup=false", "logging.level.root=INFO"})
 class WebSocketAuthTest {
+    // Mensaje del frame ERROR que envía Spring cuando JwtChannelInterceptor rechaza el CONNECT.
+    private static final String REJECTED_CONNECT_MESSAGE = "Failed to send message to ExecutorSubscribableChannel[clientInboundChannel]";
+
     static KeyPair pair = generatePair();
     static WebSocketStompClient client;
     static ThreadPoolTaskScheduler scheduler;
     @LocalServerPort int port;
     @Autowired EventRouter router;
+    @Autowired JwtEncoder encoder;
     private final AtomicReference<Throwable> clientError = new AtomicReference<>();
+    private final AtomicReference<StompHeaders> errorFrame = new AtomicReference<>();
 
     @BeforeAll static void setup() throws Exception {
         client = new WebSocketStompClient(new StandardWebSocketClient());
@@ -59,13 +66,16 @@ class WebSocketAuthTest {
 
     @TestConfiguration static class JwtTestConfig {
         @Bean @Primary JwtDecoder testDecoder() { return NimbusJwtDecoder.withPublicKey((java.security.interfaces.RSAPublicKey)pair.getPublic()).build(); }
-        @Bean JwtEncoder testEncoder() { return new NimbusJwtEncoder(new com.nimbusds.jose.jwk.source.ImmutableJWKSet<>(
-                new com.nimbusds.jose.jwk.JWKSet(new com.nimbusds.jose.jwk.RSAKey.Builder((java.security.interfaces.RSAPublicKey)pair.getPublic())
-                        .privateKey(pair.getPrivate()).build()))); }
+        @Bean JwtEncoder testEncoder() { return encoderFor(pair); }
     }
 
+    private static JwtEncoder encoderFor(KeyPair keys) {
+        return new NimbusJwtEncoder(new com.nimbusds.jose.jwk.source.ImmutableJWKSet<>(new com.nimbusds.jose.jwk.JWKSet(
+                new com.nimbusds.jose.jwk.RSAKey.Builder((java.security.interfaces.RSAPublicKey)keys.getPublic())
+                        .privateKey(keys.getPrivate()).build())));
+    }
     private String token(Instant expiry, JwtEncoder encoder) {
-        var claims = JwtClaimsSet.builder().subject("seller-1").issuedAt(Instant.now().minusSeconds(1)).expiresAt(expiry)
+        var claims = JwtClaimsSet.builder().subject("seller-1").issuedAt(expiry.minus(Duration.ofMinutes(10))).expiresAt(expiry)
                 .claim("role", "PROFESSIONAL").build();
         return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(SignatureAlgorithm.RS256).build(), claims)).getTokenValue();
     }
@@ -73,12 +83,21 @@ class WebSocketAuthTest {
         var headers = new StompHeaders(); if (token != null) headers.add("Authorization", "Bearer " + token);
         return client.connectAsync("ws://localhost:" + port + "/ws", (WebSocketHttpHeaders) null, headers,
                 new StompSessionHandlerAdapter() {
+                    // Solo se invoca para frames ERROR enviados por el servidor.
+                    @Override public void handleFrame(StompHeaders headers, Object payload) { errorFrame.set(headers); }
                     @Override public void handleException(StompSession session, StompCommand command, StompHeaders headers,
                             byte[] payload, Throwable exception) { clientError.set(exception); }
                     @Override public void handleTransportError(StompSession session, Throwable exception) { clientError.set(exception); }
                 }).get(5, TimeUnit.SECONDS);
     }
-    @Autowired JwtEncoder encoder;
+    // Un rechazo real es un frame ERROR seguido del cierre de la conexión.
+    // Si el servidor no responde, get() lanza TimeoutException y la prueba falla.
+    private void assertConnectRejected(String token) {
+        var exception = assertThrows(ExecutionException.class, () -> connect(token));
+        assertInstanceOf(ConnectionLostException.class, exception.getCause());
+        assertNotNull(errorFrame.get(), "El servidor debe enviar un frame ERROR antes de cerrar la conexión");
+        assertEquals(REJECTED_CONNECT_MESSAGE, errorFrame.get().getFirst("message"));
+    }
 
     @Test void validTokenConnectsSubscribesAndReceivesEvent() throws Exception {
         var session = connect(token(Instant.now().plusSeconds(60), encoder));
@@ -95,12 +114,11 @@ class WebSocketAuthTest {
         assertEquals("e1", result.get("eventId"));
         session.disconnect();
     }
-    @Test void missingTokenFails() { assertThrows(Exception.class, () -> connect(null)); }
+    @Test void missingTokenFails() { assertConnectRejected(null); }
     @Test void invalidSignatureFails() throws Exception {
-        var otherGen = KeyPairGenerator.getInstance("RSA"); otherGen.initialize(2048); var other = otherGen.generateKeyPair();
-        var falseEncoder = new NimbusJwtEncoder(new com.nimbusds.jose.jwk.source.ImmutableJWKSet<>(new com.nimbusds.jose.jwk.JWKSet(
-                new com.nimbusds.jose.jwk.RSAKey.Builder((java.security.interfaces.RSAPublicKey)other.getPublic()).privateKey(other.getPrivate()).build())));
-        assertThrows(Exception.class, () -> connect(token(Instant.now().plusSeconds(60), falseEncoder)));
+        var otherGen = KeyPairGenerator.getInstance("RSA"); otherGen.initialize(2048);
+        assertConnectRejected(token(Instant.now().plusSeconds(60), encoderFor(otherGen.generateKeyPair())));
     }
-    @Test void expiredTokenFails() { assertThrows(Exception.class, () -> connect(token(Instant.now().minusSeconds(60), encoder))); }
+    // Vencido 5 minutos: queda fuera de la tolerancia de reloj de 60 s de NimbusJwtDecoder.
+    @Test void expiredTokenFails() { assertConnectRejected(token(Instant.now().minus(Duration.ofMinutes(5)), encoder)); }
 }

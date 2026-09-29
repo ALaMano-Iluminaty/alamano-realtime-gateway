@@ -12,17 +12,23 @@ class DomainEventListenerTest {
     private EventEnvelope event(String id, String type) {
         return new EventEnvelope(id, type, 1, Instant.now(), "corr", JsonNodeFactory.instance.objectNode());
     }
-    @Test void routesMapEventsAndDeduplicates() {
+    @Test void routesMapEvents() {
         var template = mock(SimpMessagingTemplate.class);
         var listener = new DomainEventListener(new ProcessedEvents(20), new EventRouter(template));
         var online = event("1", "professional.online");
-        listener.handle(online); listener.handle(online);
-        listener.handle(event("2", "professional.disconnected"));
-        var payloads = org.mockito.ArgumentCaptor.forClass(Object.class);
-        verify(template, times(2)).convertAndSend(eq(EventRouter.MAP_TOPIC), payloads.capture());
-        assertTrue(payloads.getAllValues().contains(online));
-        assertTrue(payloads.getAllValues().stream().map(EventEnvelope.class::cast)
-                .anyMatch(e -> e.type().equals("professional.disconnected")));
+        var disconnected = event("2", "professional.disconnected");
+        listener.handle(online);
+        listener.handle(disconnected);
+        verify(template).convertAndSend(EventRouter.MAP_TOPIC, online);
+        verify(template).convertAndSend(EventRouter.MAP_TOPIC, disconnected);
+    }
+    @Test void duplicateEventIsSentOnce() {
+        var template = mock(SimpMessagingTemplate.class);
+        var listener = new DomainEventListener(new ProcessedEvents(20), new EventRouter(template));
+        var online = event("1", "professional.online");
+        listener.handle(online);
+        listener.handle(online);
+        verify(template, times(1)).convertAndSend(EventRouter.MAP_TOPIC, online);
     }
     @Test void ignoresUnknownType() {
         var template = mock(SimpMessagingTemplate.class);

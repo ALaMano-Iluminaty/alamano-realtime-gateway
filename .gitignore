@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Local ###
+.claude/settings.local.json
+Codex_Tarea318_Base_Gateway.md

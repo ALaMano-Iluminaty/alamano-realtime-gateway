@@ -11,6 +11,13 @@ Requiere Java 21, Maven Wrapper y RabbitMQ accesible. La llave incluida en `dev-
 ./scripts/token.sh
 ```
 
+En Windows usa `mvnw.cmd`. Desde PowerShell hay que anteponer `.\`, porque PowerShell no ejecuta programas de la carpeta actual sin ruta:
+
+```powershell
+.\mvnw.cmd test
+.\mvnw.cmd spring-boot:run
+```
+
 El endpoint WebSocket nativo es `ws://localhost:8083/ws` (sin SockJS). El cliente debe enviar `Authorization: Bearer <JWT>` como header STOMP del frame `CONNECT`. Los JWT deben estar firmados con RS256.
 
 ## Destinos STOMP

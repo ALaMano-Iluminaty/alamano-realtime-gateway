@@ -16,9 +16,11 @@ public class RabbitConfig {
     public static final String EVENTS_EXCHANGE = "alamano.events";
     public static final String DLX_EXCHANGE = "alamano.events.dlx";
 
+    // Exclusiva además de no durable: RabbitMQ 4 rechaza por defecto las colas no durables compartibles
+    // (transient_nonexcl_queues). Muere con la conexión de esta instancia, que es lo que se busca.
     @Bean
     org.springframework.amqp.core.Queue gatewayQueue(@Value("${alamano.gateway.instance-id}") String instanceId) {
-        return QueueBuilder.nonDurable("gateway." + instanceId).autoDelete()
+        return QueueBuilder.nonDurable("gateway." + instanceId).exclusive().autoDelete()
                 .deadLetterExchange(DLX_EXCHANGE).deadLetterRoutingKey("gateway.dlq").build();
     }
 

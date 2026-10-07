@@ -52,3 +52,27 @@ Generar un token: `./scripts/token.sh [sub] [role] [minutos] [llave-privada]`. P
 | `JWT_PUBLIC_KEY_LOCATION` | `classpath:keys/public.pem` | Ubicación de llave RSA pública PEM |
 | `HOSTNAME` | `local` | Identificador de instancia y nombre de cola |
 | `ALLOWED_ORIGINS` | `http://localhost,http://localhost:5173` | Orígenes permitidos separados por comas |
+
+## HU5: presencia del vendedor
+
+El Gateway registra las sesiones WebSocket autenticadas con rol `PROFESSIONAL` en la instancia actual. Al cerrar la pestaña o cerrarse una conexión por pérdida de red (detectada cuando vencen los heartbeats STOMP de 10 segundos), solo publica un aviso cuando termina la última sesión del vendedor en esa instancia. Si mantiene otra pestaña abierta en la misma instancia, su presencia continúa activa.
+
+El evento técnico se publica en el exchange `alamano.events` con routing key y tipo `professional.connection.lost`:
+
+```json
+{
+  "eventId": "uuid-nuevo",
+  "type": "professional.connection.lost",
+  "schemaVersion": 1,
+  "occurredAt": "2026-10-07T15:30:00Z",
+  "correlationId": "uuid-nuevo",
+  "payload": {
+    "professionalId": "pro-1",
+    "gatewayInstance": "local"
+  }
+}
+```
+
+El Gateway solo informa la pérdida técnica. El Core decide si el vendedor debe quedar `OFFLINE` y, si corresponde, publica `professional.disconnected` para que el Gateway lo reenvíe al mapa.
+
+**Limitación conocida:** cada instancia solo conoce sus propias sesiones. Si un vendedor mantiene conexiones simultáneas en instancias distintas, la desconexión en una puede producir un aviso aunque siga conectado a otra. Para el MVP se asume una sola instancia; como mejora futura, el registro de sesiones puede compartirse mediante Redis u otro almacenamiento común.

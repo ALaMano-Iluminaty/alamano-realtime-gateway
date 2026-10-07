@@ -1,5 +1,7 @@
 package com.alamano.gateway.events;
 
+import com.alamano.gateway.services.ActiveServiceRegistry;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -10,12 +12,38 @@ public class EventRouter {
     public static final String MAP_TOPIC = "/topic/map";
     private static final Logger log = LoggerFactory.getLogger(EventRouter.class);
     private final SimpMessagingTemplate messagingTemplate;
-    public EventRouter(SimpMessagingTemplate messagingTemplate) { this.messagingTemplate = messagingTemplate; }
+    private final ActiveServiceRegistry activeServices;
+    public EventRouter(SimpMessagingTemplate messagingTemplate, ActiveServiceRegistry activeServices) {
+        this.messagingTemplate = messagingTemplate;
+        this.activeServices = activeServices;
+    }
     public void route(EventEnvelope event) {
-        if ("professional.online".equals(event.type()) || "professional.disconnected".equals(event.type())) {
-            messagingTemplate.convertAndSend(MAP_TOPIC, event);
-        } else {
-            log.debug("Evento ignorado por el enrutador: {}", event.type());
+        switch (event.type()) {
+            case "professional.online", "professional.disconnected" -> messagingTemplate.convertAndSend(MAP_TOPIC, event);
+            case "service.status.changed" -> applyServiceStatus(event);
+            default -> log.debug("Evento ignorado por el enrutador: {}", event.type());
         }
+    }
+
+    // Solo alimenta el registro de servicios activos; reenviarlo a /topic/service.{id} es otra tarea (AB#303).
+    private void applyServiceStatus(EventEnvelope event) {
+        JsonNode payload = event.payload();
+        String serviceId = text(payload, "serviceId");
+        String professionalId = text(payload, "professionalId");
+        String clientId = text(payload, "clientId");
+        String status = text(payload, "status");
+        JsonNode version = payload == null ? null : payload.get("version");
+        if (serviceId == null || professionalId == null || clientId == null || status == null
+                || version == null || !version.canConvertToLong()) {
+            log.warn("Evento service.status.changed incompleto: se ignora.");
+            return;
+        }
+        activeServices.apply(serviceId, professionalId, clientId, status, version.asLong());
+    }
+
+    static String text(JsonNode payload, String field) {
+        if (payload == null) return null;
+        JsonNode value = payload.get(field);
+        return value == null || value.isNull() ? null : value.asText();
     }
 }

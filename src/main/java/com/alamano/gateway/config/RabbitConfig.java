@@ -24,6 +24,8 @@ public class RabbitConfig {
                 .deadLetterExchange(DLX_EXCHANGE).deadLetterRoutingKey("gateway.dlq").build();
     }
 
+    // En un topic exchange "*" cubre una sola palabra: service.status.changed no entra por service.*
+    // y necesita su propio binding. Cada evento nuevo de varias palabras que el Gateway deba recibir necesita el suyo.
     @Bean
     Declarables gatewayBindings(org.springframework.amqp.core.Queue gatewayQueue) {
         var exchange = ExchangeBuilder.topicExchange(EVENTS_EXCHANGE).durable(true).build();
@@ -31,7 +33,8 @@ public class RabbitConfig {
         return new Declarables(exchange, dlx,
                 BindingBuilder.bind(gatewayQueue).to(exchange).with("professional.*").noargs(),
                 BindingBuilder.bind(gatewayQueue).to(exchange).with("service.*").noargs(),
-                BindingBuilder.bind(gatewayQueue).to(exchange).with("tracking.*").noargs());
+                BindingBuilder.bind(gatewayQueue).to(exchange).with("tracking.*").noargs(),
+                BindingBuilder.bind(gatewayQueue).to(exchange).with("service.status.changed").noargs());
     }
 
     @Bean

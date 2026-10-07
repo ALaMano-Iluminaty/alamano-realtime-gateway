@@ -23,7 +23,8 @@ El endpoint WebSocket nativo es `ws://localhost:8083/ws` (sin SockJS). El client
 ## Destinos STOMP
 
 - `/topic/map`: eventos `professional.online` y `professional.disconnected`.
-- `/topic/service.{id}`: destino previsto para eventos de servicio.
+- `/topic/service.{id}`: eventos `tracking.updated` del servicio (ubicación y ETA del vendedor).
+- `/app/location`: destino de envío (SEND) de la ubicación del vendedor.
 - `/user/queue/errors`: destino de usuario previsto para errores.
 
 Suscripción y conexión de ejemplo usando `@stomp/stompjs`:
@@ -76,3 +77,41 @@ El evento técnico se publica en el exchange `alamano.events` con routing key y 
 El Gateway solo informa la pérdida técnica. El Core decide si el vendedor debe quedar `OFFLINE` y, si corresponde, publica `professional.disconnected` para que el Gateway lo reenvíe al mapa.
 
 **Limitación conocida:** cada instancia solo conoce sus propias sesiones. Si un vendedor mantiene conexiones simultáneas en instancias distintas, la desconexión en una puede producir un aviso aunque siga conectado a otra. Para el MVP se asume una sola instancia; como mejora futura, el registro de sesiones puede compartirse mediante Redis u otro almacenamiento común.
+
+## HU6: ubicación y tracking
+
+El vendedor envía su ubicación por STOMP a `/app/location` (no por HTTP):
+
+```javascript
+client.publish({
+  destination: '/app/location',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ latitude: 4.7826, longitude: -74.0435 }),
+});
+```
+
+El id del vendedor sale siempre del token del CONNECT, nunca del mensaje. El Gateway ignora la ubicación (sin responder error; eso es AB#341) si el usuario no es `PROFESSIONAL`, si las coordenadas son nulas o están fuera de rango (latitud −90..90, longitud −180..180), si el vendedor no tiene un servicio en curso o si llega antes del intervalo mínimo.
+
+Flujo completo:
+
+```
+Vendedor ──SEND /app/location {latitude, longitude}──▶ Gateway
+Gateway  ──location.updated──▶ RabbitMQ ──▶ Core (calcula el ETA)
+Core     ──tracking.updated──▶ RabbitMQ ──▶ Gateway ──▶ /topic/service.{serviceId}
+```
+
+El cliente del servicio se suscribe a `/topic/service.{serviceId}` y recibe el sobre completo de `tracking.updated`.
+
+| Evento | Publica | Payload |
+|---|---|---|
+| `service.status.changed` | Core | `serviceId`, `professionalId`, `clientId`, `previousStatus`, `status`, `version` |
+| `location.updated` | Gateway | `professionalId`, `serviceId`, `latitude`, `longitude`, `recordedAt` |
+| `tracking.updated` | Core | `serviceId`, `professionalId`, `latitude`, `longitude`, `etaSeconds`, `recordedAt` |
+
+Todos usan el sobre común (`eventId`, `type`, `schemaVersion`, `occurredAt`, `correlationId`, `payload`). El Gateway no recibe su propio `location.updated` porque ningún binding de su cola coincide con esa routing key.
+
+**Límite de frecuencia:** se acepta como máximo una ubicación por vendedor cada `alamano.gateway.location-min-interval-ms` (2000 ms por defecto); las demás se descartan.
+
+**Bindings de RabbitMQ:** en un topic exchange `*` cubre una sola palabra, así que `service.*` no recibe `service.status.changed` (tres palabras) y por eso ese evento tiene su propio binding. Cada evento nuevo de varias palabras que el Gateway deba recibir necesita el suyo en `RabbitConfig`.
+
+**Limitación conocida:** el registro de servicios activos (`ActiveServiceRegistry`) vive en memoria, es por instancia y se pierde al reiniciar. Se vuelve a llenar con el siguiente `service.status.changed` de cada servicio, así que, tras un reinicio, las ubicaciones de un servicio en curso se descartan hasta su próximo cambio de estado. Como mejora futura, puede compartirse mediante Redis.

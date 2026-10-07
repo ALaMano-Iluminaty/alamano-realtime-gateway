@@ -1,14 +1,9 @@
-package com.alamano.gateway.location;
+package com.alamano.gateway.events;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.timeout;
-import static org.mockito.Mockito.verify;
 
-import com.alamano.gateway.events.EventEnvelope;
-import com.alamano.gateway.events.EventRouter;
+import com.alamano.gateway.location.LocationPublisher;
 import com.alamano.gateway.presence.ConnectionLostPublisher;
 import com.alamano.gateway.services.ActiveServiceRegistry;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -50,7 +45,7 @@ import org.springframework.web.socket.messaging.WebSocketStompClient;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {"spring.rabbitmq.listener.simple.auto-startup=false", "logging.level.root=INFO"})
-class LocationIntegrationTest {
+class ServiceChannelIntegrationTest {
     static KeyPair pair = generatePair();
     static WebSocketStompClient client;
     static ThreadPoolTaskScheduler scheduler;
@@ -88,47 +83,50 @@ class LocationIntegrationTest {
         JwtEncoder testEncoder() {
             var jwk = new com.nimbusds.jose.jwk.RSAKey.Builder(
                     (java.security.interfaces.RSAPublicKey) pair.getPublic()).privateKey(pair.getPrivate()).build();
-            return new NimbusJwtEncoder(new com.nimbusds.jose.jwk.source.ImmutableJWKSet<>(new com.nimbusds.jose.jwk.JWKSet(jwk)));
+            return new NimbusJwtEncoder(new com.nimbusds.jose.jwk.source.ImmutableJWKSet<>(
+                    new com.nimbusds.jose.jwk.JWKSet(jwk)));
         }
     }
 
     @Test
-    void professionalLocationIsPublishedForActiveService() throws Exception {
-        activeServices.apply("s-1", "pro-1", "client-1", "EN_ROUTE", 1);
-        StompSession session = connect(token("pro-1", "PROFESSIONAL"));
+    void statusChangeIsDeliveredOnlyToSubscribersOfItsService() throws Exception {
+        activeServices.apply("s-1", "pro-1", "client-1", "RESERVED", 1);
+        activeServices.apply("s-2", "pro-2", "client-2", "RESERVED", 1);
+        StompSession firstClient = connect(token("client-1", "CLIENT"));
+        StompSession secondClient = connect(token("client-2", "CLIENT"));
+        BlockingQueue<Map<String, Object>> firstMessages = new LinkedBlockingQueue<>();
+        BlockingQueue<Map<String, Object>> secondMessages = new LinkedBlockingQueue<>();
+        firstClient.subscribe("/topic/service.s-1", handler(firstMessages));
+        secondClient.subscribe("/topic/service.s-2", handler(secondMessages));
+        Thread.sleep(250);
 
-        session.send("/app/location", new LocationMessage(4.7826, -74.0435));
+        Map<String, Object> received = null;
+        for (int version = 2; version < 22 && received == null; version++) {
+            var payload = JsonNodeFactory.instance.objectNode().put("serviceId", "s-1")
+                    .put("professionalId", "pro-1").put("clientId", "client-1")
+                    .put("previousStatus", version == 2 ? "RESERVED" : "EN_ROUTE")
+                    .put("status", "EN_ROUTE").put("version", version);
+            router.route(new EventEnvelope("status-" + version, "service.status.changed", 1,
+                    Instant.now(), "corr-1", payload));
+            received = firstMessages.poll(100, TimeUnit.MILLISECONDS);
+        }
 
-        verify(locationPublisher, timeout(TimeUnit.SECONDS.toMillis(3)))
-                .publish(eq("pro-1"), eq("s-1"), eq(4.7826), eq(-74.0435), any(Instant.class));
-        session.disconnect();
+        assertNotNull(received, "El cliente del servicio s-1 debe recibir el cambio de estado");
+        assertEquals("service.status.changed", received.get("type"));
+        assertEquals("s-1", ((Map<?, ?>) received.get("payload")).get("serviceId"));
+        assertEquals(0, secondMessages.size(), "El cliente de s-2 no debe recibir eventos de s-1");
+        firstClient.disconnect();
+        secondClient.disconnect();
     }
 
-    @Test
-    void clientSubscribedToServiceReceivesTracking() throws Exception {
-        activeServices.apply("s-1", "pro-1", "client-1", "EN_ROUTE", 1);
-        StompSession session = connect(token("client-1", "CLIENT"));
-        BlockingQueue<Map<String, Object>> received = new LinkedBlockingQueue<>();
-        session.subscribe(EventRouter.SERVICE_TOPIC_PREFIX + "s-1", new StompFrameHandler() {
+    private StompFrameHandler handler(BlockingQueue<Map<String, Object>> queue) {
+        return new StompFrameHandler() {
             @Override public Type getPayloadType(StompHeaders headers) { return Map.class; }
             @SuppressWarnings("unchecked")
-            @Override public void handleFrame(StompHeaders headers, Object payload) { received.add((Map<String, Object>) payload); }
-        });
-
-        var payload = JsonNodeFactory.instance.objectNode().put("serviceId", "s-1").put("professionalId", "pro-1")
-                .put("latitude", 4.7826).put("longitude", -74.0435).put("etaSeconds", 420)
-                .put("recordedAt", "2026-10-07T12:00:00Z");
-        var tracking = new EventEnvelope("t-1", "tracking.updated", 1, Instant.now(), "corr-1", payload);
-        // La suscripción tarda unos milisegundos en registrarse: se reintenta el envío.
-        Map<String, Object> result = null;
-        for (int i = 0; i < 20 && result == null; i++) {
-            router.route(tracking);
-            result = received.poll(100, TimeUnit.MILLISECONDS);
-        }
-        assertNotNull(result, "El cliente debe recibir tracking.updated en /topic/service.s-1");
-        assertEquals("tracking.updated", result.get("type"));
-        assertEquals("t-1", result.get("eventId"));
-        session.disconnect();
+            @Override public void handleFrame(StompHeaders headers, Object payload) {
+                queue.add((Map<String, Object>) payload);
+            }
+        };
     }
 
     private StompSession connect(String token) throws Exception {
@@ -142,7 +140,8 @@ class LocationIntegrationTest {
         Instant now = Instant.now();
         var claims = JwtClaimsSet.builder().subject(subject).issuedAt(now.minusSeconds(1)).expiresAt(now.plusSeconds(60))
                 .claim("role", role).build();
-        return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(SignatureAlgorithm.RS256).build(), claims)).getTokenValue();
+        return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(SignatureAlgorithm.RS256).build(), claims))
+                .getTokenValue();
     }
 
     private static KeyPair generatePair() {

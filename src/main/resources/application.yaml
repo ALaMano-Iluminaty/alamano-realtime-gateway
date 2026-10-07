@@ -18,6 +18,7 @@ alamano:
     instance-id: ${HOSTNAME:local}
     allowed-origins: ${ALLOWED_ORIGINS:http://localhost,http://localhost:5173}
     dedup-capacity: 10000
+    location-min-interval-ms: 2000
 management:
   endpoints:
     web:

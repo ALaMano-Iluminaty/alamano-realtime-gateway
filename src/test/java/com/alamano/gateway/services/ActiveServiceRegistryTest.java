@@ -1,6 +1,7 @@
 package com.alamano.gateway.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -19,7 +20,7 @@ class ActiveServiceRegistryTest {
     @Test
     void reservedRegistersServiceAndProfessional() {
         var registry = new ActiveServiceRegistry();
-        registry.apply("s-1", "pro-1", "client-1", "RESERVED", 1);
+        assertTrue(registry.apply("s-1", "pro-1", "client-1", "RESERVED", 1));
         var expected = new ActiveService("s-1", "pro-1", "client-1", "RESERVED", 1);
         assertEquals(expected, registry.findByService("s-1").orElseThrow());
         assertEquals(expected, registry.findByProfessional("pro-1").orElseThrow());
@@ -28,8 +29,8 @@ class ActiveServiceRegistryTest {
     @Test
     void higherVersionUpdatesStatus() {
         var registry = new ActiveServiceRegistry();
-        registry.apply("s-1", "pro-1", "client-1", "RESERVED", 1);
-        registry.apply("s-1", "pro-1", "client-1", "EN_ROUTE", 2);
+        assertTrue(registry.apply("s-1", "pro-1", "client-1", "RESERVED", 1));
+        assertTrue(registry.apply("s-1", "pro-1", "client-1", "EN_ROUTE", 2));
         assertEquals("EN_ROUTE", registry.findByProfessional("pro-1").orElseThrow().status());
         assertEquals(2, registry.findByService("s-1").orElseThrow().version());
     }
@@ -37,9 +38,9 @@ class ActiveServiceRegistryTest {
     @Test
     void lowerOrEqualVersionIsIgnored() {
         var registry = new ActiveServiceRegistry();
-        registry.apply("s-1", "pro-1", "client-1", "EN_ROUTE", 2);
-        registry.apply("s-1", "pro-1", "client-1", "ARRIVED", 2);
-        registry.apply("s-1", "pro-1", "client-1", "RESERVED", 1);
+        assertTrue(registry.apply("s-1", "pro-1", "client-1", "EN_ROUTE", 2));
+        assertFalse(registry.apply("s-1", "pro-1", "client-1", "ARRIVED", 2));
+        assertFalse(registry.apply("s-1", "pro-1", "client-1", "RESERVED", 1));
         var service = registry.findByService("s-1").orElseThrow();
         assertEquals("EN_ROUTE", service.status());
         assertEquals(2, service.version());
@@ -49,8 +50,8 @@ class ActiveServiceRegistryTest {
     @ValueSource(strings = {"COMPLETED", "CANCELLED"})
     void terminalStatusRemovesServiceAndProfessional(String terminal) {
         var registry = new ActiveServiceRegistry();
-        registry.apply("s-1", "pro-1", "client-1", "IN_PROGRESS", 3);
-        registry.apply("s-1", "pro-1", "client-1", terminal, 4);
+        assertTrue(registry.apply("s-1", "pro-1", "client-1", "IN_PROGRESS", 3));
+        assertTrue(registry.apply("s-1", "pro-1", "client-1", terminal, 4));
         assertTrue(registry.findByService("s-1").isEmpty());
         assertTrue(registry.findByProfessional("pro-1").isEmpty());
     }
@@ -58,11 +59,18 @@ class ActiveServiceRegistryTest {
     @Test
     void oldEventAfterTerminalDoesNotRegisterAgain() {
         var registry = new ActiveServiceRegistry();
-        registry.apply("s-1", "pro-1", "client-1", "EN_ROUTE", 2);
-        registry.apply("s-1", "pro-1", "client-1", "COMPLETED", 5);
-        registry.apply("s-1", "pro-1", "client-1", "IN_PROGRESS", 4);
+        assertTrue(registry.apply("s-1", "pro-1", "client-1", "EN_ROUTE", 2));
+        assertTrue(registry.apply("s-1", "pro-1", "client-1", "COMPLETED", 5));
+        assertFalse(registry.apply("s-1", "pro-1", "client-1", "IN_PROGRESS", 4));
         assertTrue(registry.findByService("s-1").isEmpty());
         assertTrue(registry.findByProfessional("pro-1").isEmpty());
+    }
+
+    @Test
+    void unknownStatusIsIgnoredAndReturnsFalse() {
+        var registry = new ActiveServiceRegistry();
+        assertFalse(registry.apply("s-1", "pro-1", "client-1", "UNKNOWN", 1));
+        assertTrue(registry.findByService("s-1").isEmpty());
     }
 
     @Test

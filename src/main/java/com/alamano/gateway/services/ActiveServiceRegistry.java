@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -39,12 +40,13 @@ public class ActiveServiceRegistry {
         });
     }
 
-    public void apply(String serviceId, String professionalId, String clientId, String status, long version) {
+    public boolean apply(String serviceId, String professionalId, String clientId, String status, long version) {
         boolean active = ACTIVE_STATUSES.contains(status);
         if (!active && !TERMINAL_STATUSES.contains(status)) {
             log.warn("Estado de servicio desconocido {} para el servicio {}: se ignora.", status, serviceId);
-            return;
+            return false;
         }
+        AtomicBoolean applied = new AtomicBoolean();
         // compute bloquea la clave serviceId: cada cambio de este servicio (y de su vendedor) ocurre aquí dentro, en orden.
         servicesById.compute(serviceId, (id, current) -> {
             Long lastVersion = lastVersions.get(id);
@@ -53,6 +55,7 @@ public class ActiveServiceRegistry {
                 log.debug("Evento de servicio {} ignorado: versión {} no es mayor que {}.", id, version, lastVersion);
                 return current;
             }
+            applied.set(true);
             lastVersions.put(id, version);
             if (current != null && !current.professionalId().equals(professionalId)) {
                 serviceByProfessional.remove(current.professionalId(), id);
@@ -64,6 +67,7 @@ public class ActiveServiceRegistry {
             serviceByProfessional.put(professionalId, id);
             return new ActiveService(id, professionalId, clientId, status, version);
         });
+        return applied.get();
     }
 
     public Optional<ActiveService> findByProfessional(String professionalId) {

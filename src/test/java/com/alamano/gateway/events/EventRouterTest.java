@@ -20,14 +20,44 @@ class EventRouterTest {
     private final EventRouter router = new EventRouter(template, registry);
 
     @Test
-    void serviceStatusChangedUpdatesRegistryWithoutSending() {
+    void newerServiceStatusChangedUpdatesRegistryAndSendsToServiceTopic() {
         ObjectNode payload = JsonNodeFactory.instance.objectNode()
                 .put("serviceId", "s-1").put("professionalId", "pro-1").put("clientId", "client-1")
                 .put("previousStatus", "RESERVED").put("status", "EN_ROUTE").put("version", 2);
-        router.route(event("service.status.changed", payload));
+        EventEnvelope status = event("service.status.changed", payload);
+        router.route(status);
         assertEquals(new ActiveService("s-1", "pro-1", "client-1", "EN_ROUTE", 2),
                 registry.findByProfessional("pro-1").orElseThrow());
-        verifyNoInteractions(template);
+        verify(template).convertAndSend("/topic/service.s-1", status);
+    }
+
+    @Test
+    void oldServiceStatusChangedIsNotSent() {
+        ObjectNode payload = JsonNodeFactory.instance.objectNode()
+                .put("serviceId", "s-1").put("professionalId", "pro-1").put("clientId", "client-1")
+                .put("status", "EN_ROUTE").put("version", 2);
+        EventEnvelope current = event("service.status.changed", payload);
+        router.route(current);
+        ObjectNode oldPayload = payload.deepCopy().put("status", "RESERVED").put("version", 1);
+        router.route(event("service.status.changed", oldPayload));
+        verify(template).convertAndSend("/topic/service.s-1", current);
+        verifyNoInteractionsForRemainingCalls();
+    }
+
+    private void verifyNoInteractionsForRemainingCalls() {
+        org.mockito.Mockito.verifyNoMoreInteractions(template);
+    }
+
+    @Test
+    void terminalServiceStatusIsSent() {
+        ObjectNode activePayload = JsonNodeFactory.instance.objectNode()
+                .put("serviceId", "s-1").put("professionalId", "pro-1").put("clientId", "client-1")
+                .put("status", "IN_PROGRESS").put("version", 3);
+        router.route(event("service.status.changed", activePayload));
+        EventEnvelope terminal = event("service.status.changed", activePayload.deepCopy()
+                .put("status", "COMPLETED").put("version", 4));
+        router.route(terminal);
+        verify(template).convertAndSend("/topic/service.s-1", terminal);
     }
 
     @Test

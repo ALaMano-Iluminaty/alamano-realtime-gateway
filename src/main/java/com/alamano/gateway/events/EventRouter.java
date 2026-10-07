@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class EventRouter {
     public static final String MAP_TOPIC = "/topic/map";
+    public static final String SERVICE_TOPIC_PREFIX = "/topic/service.";
     private static final Logger log = LoggerFactory.getLogger(EventRouter.class);
     private final SimpMessagingTemplate messagingTemplate;
     private final ActiveServiceRegistry activeServices;
@@ -21,8 +22,19 @@ public class EventRouter {
         switch (event.type()) {
             case "professional.online", "professional.disconnected" -> messagingTemplate.convertAndSend(MAP_TOPIC, event);
             case "service.status.changed" -> applyServiceStatus(event);
+            case "tracking.updated" -> routeTracking(event);
             default -> log.debug("Evento ignorado por el enrutador: {}", event.type());
         }
+    }
+
+    // El cliente del servicio recibe el sobre completo (ubicación y ETA) en /topic/service.{serviceId}.
+    private void routeTracking(EventEnvelope event) {
+        String serviceId = text(event.payload(), "serviceId");
+        if (serviceId == null) {
+            log.warn("Evento tracking.updated sin serviceId: se ignora.");
+            return;
+        }
+        messagingTemplate.convertAndSend(SERVICE_TOPIC_PREFIX + serviceId, event);
     }
 
     // Solo alimenta el registro de servicios activos; reenviarlo a /topic/service.{id} es otra tarea (AB#303).

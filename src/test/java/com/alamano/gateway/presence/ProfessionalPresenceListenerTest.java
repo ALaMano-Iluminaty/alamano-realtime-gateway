@@ -14,7 +14,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
-import org.springframework.messaging.simp.stomp.StompCommand;
+import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -31,7 +31,7 @@ class ProfessionalPresenceListenerTest {
         var listener = new ProfessionalPresenceListener(registry, publisher);
         JwtAuthenticationToken user = user("pro-1", "PROFESSIONAL");
         listener.onSessionConnected(connected("session-1", user));
-        listener.onSessionDisconnect(disconnected("session-1", user));
+        listener.onSessionDisconnect(disconnected("session-1"));
         verify(publisher).publish(eq("pro-1"), any(Instant.class));
     }
 
@@ -43,9 +43,9 @@ class ProfessionalPresenceListenerTest {
         JwtAuthenticationToken user = user("pro-1", "PROFESSIONAL");
         listener.onSessionConnected(connected("session-1", user));
         listener.onSessionConnected(connected("session-2", user));
-        listener.onSessionDisconnect(disconnected("session-1", user));
+        listener.onSessionDisconnect(disconnected("session-1"));
         verifyNoInteractions(publisher);
-        listener.onSessionDisconnect(disconnected("session-2", user));
+        listener.onSessionDisconnect(disconnected("session-2"));
         verify(publisher).publish(eq("pro-1"), any(Instant.class));
     }
 
@@ -56,7 +56,7 @@ class ProfessionalPresenceListenerTest {
         var listener = new ProfessionalPresenceListener(registry, publisher);
         JwtAuthenticationToken user = user("pro-1", "PROFESSIONAL");
         listener.onSessionConnected(connected("session-1", user));
-        var disconnect = disconnected("session-1", user);
+        var disconnect = disconnected("session-1");
         listener.onSessionDisconnect(disconnect);
         listener.onSessionDisconnect(disconnect);
         verify(publisher, times(1)).publish(eq("pro-1"), any(Instant.class));
@@ -68,15 +68,16 @@ class ProfessionalPresenceListenerTest {
         var listener = new ProfessionalPresenceListener(new ProfessionalSessionRegistry(), publisher);
         JwtAuthenticationToken user = user("client-1", "CLIENT");
         listener.onSessionConnected(connected("session-1", user));
-        listener.onSessionDisconnect(disconnected("session-1", user));
+        listener.onSessionDisconnect(disconnected("session-1"));
         verifyNoInteractions(publisher);
     }
 
+    // Toda desconexión llega sin usuario; si la sesión nunca se registró, no hay nada que publicar.
     @Test
-    void disconnectWithoutUserDoesNotThrowOrPublish() {
+    void disconnectOfUnregisteredSessionDoesNotThrowOrPublish() {
         var publisher = mock(ConnectionLostPublisher.class);
         var listener = new ProfessionalPresenceListener(new ProfessionalSessionRegistry(), publisher);
-        assertDoesNotThrow(() -> listener.onSessionDisconnect(disconnected("session-1", null)));
+        assertDoesNotThrow(() -> listener.onSessionDisconnect(disconnected("session-1")));
         verifyNoInteractions(publisher);
     }
 
@@ -89,18 +90,18 @@ class ProfessionalPresenceListenerTest {
 
     private static SessionConnectedEvent connected(String sessionId, Principal user) {
         return new SessionConnectedEvent(ProfessionalPresenceListenerTest.class,
-                message(StompCommand.CONNECTED, sessionId, user), user);
+                message(SimpMessageType.CONNECT_ACK, sessionId), user);
     }
 
-    private static SessionDisconnectEvent disconnected(String sessionId, Principal user) {
+    // Como en producción, el listener no depende del usuario al desconectar: solo usa el id de sesión.
+    private static SessionDisconnectEvent disconnected(String sessionId) {
         return new SessionDisconnectEvent(ProfessionalPresenceListenerTest.class,
-                message(StompCommand.DISCONNECT, sessionId, user), sessionId, CloseStatus.NORMAL, user);
+                message(SimpMessageType.DISCONNECT, sessionId), sessionId, CloseStatus.NORMAL, null);
     }
 
-    private static Message<byte[]> message(StompCommand command, String sessionId, Principal user) {
-        var accessor = SimpMessageHeaderAccessor.create(org.springframework.messaging.simp.SimpMessageType.DISCONNECT);
+    private static Message<byte[]> message(SimpMessageType type, String sessionId) {
+        var accessor = SimpMessageHeaderAccessor.create(type);
         accessor.setSessionId(sessionId);
-        accessor.setUser(user);
         return MessageBuilder.createMessage(new byte[0], accessor.getMessageHeaders());
     }
 }

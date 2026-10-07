@@ -1,5 +1,6 @@
 package com.alamano.gateway.presence;
 
+import java.security.Principal;
 import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -27,9 +28,10 @@ public class ProfessionalPresenceListener {
         this.connectionLostPublisher = connectionLostPublisher;
     }
 
+    // El usuario es el JwtAuthenticationToken que JwtChannelInterceptor validó en el CONNECT.
     @EventListener
     public void onSessionConnected(SessionConnectedEvent event) {
-        JwtAuthenticationToken user = professionalUser(principal(event.getUser(), event.getMessage().getHeaders()));
+        JwtAuthenticationToken user = professionalUser(event.getUser());
         if (user == null) return;
         String sessionId = SimpMessageHeaderAccessor.getSessionId(event.getMessage().getHeaders());
         if (sessionId == null) return;
@@ -41,14 +43,13 @@ public class ProfessionalPresenceListener {
                 sessionRegistry.sessionCount(professionalId));
     }
 
+    // Solo se usa el id de sesión: el vendedor sale del registro hecho en el CONNECTED.
+    // remove es atómico, así que un SessionDisconnectEvent repetido devuelve null y no publica dos veces.
     @EventListener
     public void onSessionDisconnect(SessionDisconnectEvent event) {
         String sessionId = event.getSessionId();
-        JwtAuthenticationToken user = professionalUser(principal(event.getUser(), event.getMessage().getHeaders()));
-        String professionalId = user == null ? professionalBySession.remove(sessionId)
-                : user.getToken().getSubject();
+        String professionalId = professionalBySession.remove(sessionId);
         if (professionalId == null) return;
-        professionalBySession.remove(sessionId);
         boolean lastSession = sessionRegistry.unregister(professionalId, sessionId);
         log.info("Sesión cerrada para el vendedor {} (sesiones activas: {}).", professionalId,
                 sessionRegistry.sessionCount(professionalId));
@@ -58,12 +59,7 @@ public class ProfessionalPresenceListener {
         }
     }
 
-    private java.security.Principal principal(java.security.Principal eventUser,
-            org.springframework.messaging.MessageHeaders headers) {
-        return eventUser != null ? eventUser : SimpMessageHeaderAccessor.getUser(headers);
-    }
-
-    private JwtAuthenticationToken professionalUser(java.security.Principal principal) {
+    private JwtAuthenticationToken professionalUser(Principal principal) {
         if (!(principal instanceof JwtAuthenticationToken authentication)) return null;
         boolean professional = authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)

@@ -38,25 +38,24 @@ public class LocationController {
     @MessageMapping("/location")
     public void receiveLocation(LocationMessage message, Principal principal) {
         if (!isProfessional(principal)) {
-            log.warn("UbicaciÃ³n ignorada: el usuario no es un vendedor.");
             notify(principal, "forbidden", "Solo un vendedor puede compartir su ubicación");
             return;
         }
         // El id del vendedor sale siempre del token validado, nunca del mensaje.
         String professionalId = principal.getName();
         if (!validCoordinates(message)) {
-            log.warn("UbicaciÃ³n ignorada del vendedor {}: coordenadas nulas o fuera de rango.", professionalId);
+            log.warn("Ubicación ignorada del vendedor {}: coordenadas nulas o fuera de rango.", professionalId);
             notify(principal, "invalid_location", "La ubicación no es válida");
             return;
         }
         Optional<ActiveService> service = activeServices.findByProfessional(professionalId);
         if (service.isEmpty()) {
-            log.debug("UbicaciÃ³n ignorada del vendedor {}: no tiene un servicio en curso.", professionalId);
+            log.debug("Ubicación ignorada del vendedor {}: no tiene un servicio en curso.", professionalId);
             notify(principal, "no_active_service", "Solo puedes compartir tu ubicación durante un servicio en curso");
             return;
         }
         if (!rateLimiter.tryAcquire(professionalId)) {
-            log.debug("UbicaciÃ³n ignorada del vendedor {}: llegÃ³ antes del intervalo mÃ­nimo.", professionalId);
+            log.debug("Ubicación ignorada del vendedor {}: llegó antes del intervalo mínimo.", professionalId);
             return;
         }
         publisher.publish(professionalId, service.get().serviceId(), message.latitude(), message.longitude(),

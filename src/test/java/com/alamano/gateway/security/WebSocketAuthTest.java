@@ -3,6 +3,7 @@ package com.alamano.gateway.security;
 import static org.junit.jupiter.api.Assertions.*;
 import com.alamano.gateway.events.EventEnvelope;
 import com.alamano.gateway.events.EventRouter;
+import com.alamano.gateway.presence.ConnectionLostPublisher;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -33,6 +34,7 @@ import org.springframework.messaging.simp.stomp.StompSessionHandlerAdapter;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.WebSocketHttpHeaders;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
@@ -49,6 +51,8 @@ class WebSocketAuthTest {
     @LocalServerPort int port;
     @Autowired EventRouter router;
     @Autowired JwtEncoder encoder;
+    // Evita que la desconexión del vendedor de prueba intente publicar en un RabbitMQ real.
+    @MockitoBean ConnectionLostPublisher connectionLostPublisher;
     private final AtomicReference<Throwable> clientError = new AtomicReference<>();
     private final AtomicReference<StompHeaders> errorFrame = new AtomicReference<>();
 

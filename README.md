@@ -23,9 +23,9 @@ El endpoint WebSocket nativo es `ws://localhost:8083/ws` (sin SockJS). El client
 ## Destinos STOMP
 
 - `/topic/map`: eventos `professional.online` y `professional.disconnected`.
-- `/topic/service.{id}`: eventos `tracking.updated` del servicio (ubicación y ETA del vendedor).
+- `/topic/service.{id}`: eventos `service.status.changed` y `tracking.updated` del servicio (estado, versión, ubicación y ETA).
 - `/app/location`: destino de envío (SEND) de la ubicación del vendedor.
-- `/user/queue/errors`: destino de usuario previsto para errores.
+- `/user/queue/errors`: avisos privados para el usuario autenticado cuando se rechaza una acción.
 
 Suscripción y conexión de ejemplo usando `@stomp/stompjs`:
 
@@ -90,7 +90,7 @@ client.publish({
 });
 ```
 
-El id del vendedor sale siempre del token del CONNECT, nunca del mensaje. El Gateway ignora la ubicación (sin responder error; eso es AB#341) si el usuario no es `PROFESSIONAL`, si las coordenadas son nulas o están fuera de rango (latitud −90..90, longitud −180..180), si el vendedor no tiene un servicio en curso o si llega antes del intervalo mínimo.
+El id del vendedor sale siempre del token del CONNECT, nunca del mensaje. Los rechazos por rol, coordenadas inválidas o falta de servicio generan un aviso en `/user/queue/errors`; las ubicaciones dentro del intervalo mínimo se descartan sin aviso.
 
 Flujo completo:
 
@@ -115,3 +115,23 @@ Todos usan el sobre común (`eventId`, `type`, `schemaVersion`, `occurredAt`, `c
 **Bindings de RabbitMQ:** en un topic exchange `*` cubre una sola palabra, así que `service.*` no recibe `service.status.changed` (tres palabras) y por eso ese evento tiene su propio binding. Cada evento nuevo de varias palabras que el Gateway deba recibir necesita el suyo en `RabbitConfig`.
 
 **Limitación conocida:** el registro de servicios activos (`ActiveServiceRegistry`) vive en memoria, es por instancia y se pierde al reiniciar. Se vuelve a llenar con el siguiente `service.status.changed` de cada servicio, así que, tras un reinicio, las ubicaciones de un servicio en curso se descartan hasta su próximo cambio de estado. Como mejora futura, puede compartirse mediante Redis.
+
+## HU7 y HU8: canal del servicio
+
+`/topic/service.{id}` distribuye a los participantes los sobres completos de `service.status.changed` (estado y versión) y `tracking.updated` (ubicación y ETA). Solo el vendedor y el cliente registrados para ese servicio pueden suscribirse. `/topic/map` y `/user/**` quedan disponibles para cualquier usuario autenticado.
+
+El Gateway ignora cambios de estado viejos o repetidos según la versión. Los cambios nuevos, incluidos `COMPLETED` y `CANCELLED`, llegan al canal del servicio.
+
+| Código | Motivo | Destino asociado |
+|---|---|---|
+| `forbidden` | El usuario no puede compartir ubicación o intenta enviar directamente al broker. | `/app/location` o destino intentado |
+| `invalid_location` | Las coordenadas faltan o están fuera de rango. | `/app/location` |
+| `no_active_service` | El vendedor no tiene servicio en curso. | `/app/location` |
+| `service_unknown` | El servicio no está disponible en el registro del Gateway. | `/topic/service.{id}` |
+| `subscription_denied` | El usuario no participa en el servicio o pidió otro destino privado. | Destino intentado |
+
+Los avisos incluyen `error`, `message`, `destination` y `occurredAt`, y se reciben en `/user/queue/errors`. El límite de frecuencia de ubicación no genera aviso para evitar inundar al cliente.
+
+Los clientes solo deben enviar frames `SEND` a destinos `/app/`. Se descartan los envíos directos a `/topic/` y `/queue/`: el broker simple los retransmitiría a los suscriptores y permitiría falsificar eventos de ubicación o estado.
+
+**Dependencia conocida:** el Core aún no publica `service.status.changed` al crear un servicio. Hasta que lo haga, los servicios recién creados no estarán en el registro y la suscripción a su canal recibirá `service_unknown`. Debe resolverse publicando el evento al crear el servicio.

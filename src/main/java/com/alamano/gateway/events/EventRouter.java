@@ -37,7 +37,7 @@ public class EventRouter {
         messagingTemplate.convertAndSend(SERVICE_TOPIC_PREFIX + serviceId, event);
     }
 
-    // Solo alimenta el registro de servicios activos; reenviarlo a /topic/service.{id} es otra tarea (AB#303).
+    // Solo los cambios nuevos se envían al canal dedicado del servicio.
     private void applyServiceStatus(EventEnvelope event) {
         JsonNode payload = event.payload();
         String serviceId = text(payload, "serviceId");
@@ -50,7 +50,8 @@ public class EventRouter {
             log.warn("Evento service.status.changed incompleto: se ignora.");
             return;
         }
-        activeServices.apply(serviceId, professionalId, clientId, status, version.asLong());
+        boolean applied = activeServices.apply(serviceId, professionalId, clientId, status, version.asLong());
+        if (applied) messagingTemplate.convertAndSend(SERVICE_TOPIC_PREFIX + serviceId, event);
     }
 
     static String text(JsonNode payload, String field) {

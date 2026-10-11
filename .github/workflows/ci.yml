@@ -53,3 +53,29 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
+  deploy:
+    name: Desplegar en la VM
+    needs: image
+    if: github.event_name == 'push' && vars.AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    # Un deploy a la vez: dos merges seguidos no se pisan.
+    concurrency:
+      group: deploy-vm
+      cancel-in-progress: false
+    steps:
+      - name: Preparar SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+
+      # La VM ignora el argumento: esta llave solo puede correr deploy.sh.
+      - name: Desplegar
+        run: ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" deploy
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}

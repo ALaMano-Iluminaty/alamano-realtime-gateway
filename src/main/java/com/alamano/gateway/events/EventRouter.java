@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 public class EventRouter {
     public static final String MAP_TOPIC = "/topic/map";
     public static final String SERVICE_TOPIC_PREFIX = "/topic/service.";
+    public static final String PROFESSIONAL_SERVICES_QUEUE = "/queue/services";
     private static final Logger log = LoggerFactory.getLogger(EventRouter.class);
     private final SimpMessagingTemplate messagingTemplate;
     private final ActiveServiceRegistry activeServices;
@@ -51,7 +52,12 @@ public class EventRouter {
             return;
         }
         boolean applied = activeServices.apply(serviceId, professionalId, clientId, status, version.asLong());
-        if (applied) messagingTemplate.convertAndSend(SERVICE_TOPIC_PREFIX + serviceId, event);
+        if (!applied) return;
+        messagingTemplate.convertAndSend(SERVICE_TOPIC_PREFIX + serviceId, event);
+        // El vendedor aún no conoce el serviceId: el aviso de reserva le llega por su cola de usuario.
+        if ("RESERVED".equals(status)) {
+            messagingTemplate.convertAndSendToUser(professionalId, PROFESSIONAL_SERVICES_QUEUE, event);
+        }
     }
 
     static String text(JsonNode payload, String field) {

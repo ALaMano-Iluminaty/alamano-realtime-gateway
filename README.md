@@ -25,6 +25,7 @@ El endpoint WebSocket nativo es `ws://localhost:8083/ws` (sin SockJS). El client
 - `/topic/map`: eventos `professional.online` y `professional.disconnected`.
 - `/topic/service.{id}`: eventos `service.status.changed` y `tracking.updated` del servicio (estado, versión, ubicación y ETA).
 - `/app/location`: destino de envío (SEND) de la ubicación del vendedor.
+- `/user/queue/services`: aviso privado al vendedor cuando le reservan un servicio (`service.status.changed` con estado `RESERVED`). Trae el `serviceId` para que luego se suscriba a `/topic/service.{id}`. Solo se envía a la instancia del Gateway a la que esté conectado el vendedor.
 - `/user/queue/errors`: avisos privados para el usuario autenticado cuando se rechaza una acción.
 
 Suscripción y conexión de ejemplo usando `@stomp/stompjs`:

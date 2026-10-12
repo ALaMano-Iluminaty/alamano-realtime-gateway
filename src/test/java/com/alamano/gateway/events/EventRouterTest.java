@@ -86,6 +86,30 @@ class EventRouterTest {
         verifyNoInteractions(template);
     }
 
+    @Test
+    void reservedIsSentToServiceTopicAndProfessionalQueueOnce() {
+        ObjectNode payload = JsonNodeFactory.instance.objectNode()
+                .put("serviceId", "s-1").put("professionalId", "pro-1").put("clientId", "client-1")
+                .put("status", "RESERVED").put("version", 1);
+        EventEnvelope reserved = event("service.status.changed", payload);
+        router.route(reserved);
+        router.route(reserved);
+        verify(template).convertAndSend("/topic/service.s-1", reserved);
+        verify(template).convertAndSendToUser("pro-1", "/queue/services", reserved);
+        org.mockito.Mockito.verifyNoMoreInteractions(template);
+    }
+
+    @Test
+    void otherStatusIsSentOnlyToServiceTopic() {
+        ObjectNode payload = JsonNodeFactory.instance.objectNode()
+                .put("serviceId", "s-1").put("professionalId", "pro-1").put("clientId", "client-1")
+                .put("previousStatus", "RESERVED").put("status", "EN_ROUTE").put("version", 2);
+        EventEnvelope enRoute = event("service.status.changed", payload);
+        router.route(enRoute);
+        verify(template).convertAndSend("/topic/service.s-1", enRoute);
+        org.mockito.Mockito.verifyNoMoreInteractions(template);
+    }
+
     private static EventEnvelope event(String type, ObjectNode payload) {
         return new EventEnvelope("e-1", type, 1, Instant.now(), "corr-1", payload);
     }

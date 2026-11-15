@@ -23,7 +23,14 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      instance: ${alamano.gateway.instance-id}
 logging:
   structured:
     format:

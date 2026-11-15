@@ -19,6 +19,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private final JwtChannelInterceptor interceptor;
     private final DestinationAuthorizationInterceptor destinationAuthorizationInterceptor;
+    private final CorrelationIdChannelInterceptor correlationIdInterceptor;
     private final String[] allowedOrigins;
     private final TaskScheduler heartbeatScheduler;
 
@@ -26,10 +27,12 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     // ese bean lo crea la misma configuración de WebSocket que usa esta clase.
     public WebSocketConfig(JwtChannelInterceptor interceptor,
             DestinationAuthorizationInterceptor destinationAuthorizationInterceptor,
+            CorrelationIdChannelInterceptor correlationIdInterceptor,
             @Value("${alamano.gateway.allowed-origins}") String allowedOrigins,
             @Lazy @Qualifier("messageBrokerTaskScheduler") TaskScheduler heartbeatScheduler) {
         this.interceptor = interceptor;
         this.destinationAuthorizationInterceptor = destinationAuthorizationInterceptor;
+        this.correlationIdInterceptor = correlationIdInterceptor;
         this.allowedOrigins = Arrays.stream(allowedOrigins.split(",")).map(String::trim).toArray(String[]::new);
         this.heartbeatScheduler = heartbeatScheduler;
     }
@@ -49,6 +52,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        registration.interceptors(interceptor, destinationAuthorizationInterceptor);
+        // correlationId va primero para que todos los interceptores siguientes ya lo tengan en el MDC
+        registration.interceptors(correlationIdInterceptor, interceptor, destinationAuthorizationInterceptor);
     }
 }

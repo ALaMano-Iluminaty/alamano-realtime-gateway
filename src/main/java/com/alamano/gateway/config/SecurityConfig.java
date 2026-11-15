@@ -22,7 +22,10 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        return http.csrf(csrf -> csrf.disable())
+        // CSRF se desactiva a proposito: el Gateway solo expone endpoints stateless
+        // (actuator y el handshake WebSocket, que ya verifica Origin y el JWT antes
+        // de permitir SUBSCRIBE/SEND). Sonar S4502 marca el patron por costumbre.
+        return http.csrf(csrf -> csrf.disable()) // NOSONAR S4502
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/ws", "/ws/**",

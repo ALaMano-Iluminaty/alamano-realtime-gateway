@@ -15,7 +15,7 @@ class DomainEventListenerTest {
     }
     @Test void routesMapEvents() {
         var template = mock(SimpMessagingTemplate.class);
-        var listener = new DomainEventListener(new ProcessedEvents(20), new EventRouter(template, new ActiveServiceRegistry()));
+        var listener = new DomainEventListener(new ProcessedEvents(20), new EventRouter(template, new ActiveServiceRegistry(), new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         var online = event("1", "professional.online");
         var disconnected = event("2", "professional.disconnected");
         listener.handle(online);
@@ -25,7 +25,7 @@ class DomainEventListenerTest {
     }
     @Test void duplicateEventIsSentOnce() {
         var template = mock(SimpMessagingTemplate.class);
-        var listener = new DomainEventListener(new ProcessedEvents(20), new EventRouter(template, new ActiveServiceRegistry()));
+        var listener = new DomainEventListener(new ProcessedEvents(20), new EventRouter(template, new ActiveServiceRegistry(), new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         var online = event("1", "professional.online");
         listener.handle(online);
         listener.handle(online);
@@ -33,11 +33,11 @@ class DomainEventListenerTest {
     }
     @Test void ignoresUnknownType() {
         var template = mock(SimpMessagingTemplate.class);
-        new DomainEventListener(new ProcessedEvents(20), new EventRouter(template, new ActiveServiceRegistry())).handle(event("1", "other.event"));
+        new DomainEventListener(new ProcessedEvents(20), new EventRouter(template, new ActiveServiceRegistry(), new io.micrometer.core.instrument.simple.SimpleMeterRegistry())).handle(event("1", "other.event"));
         verifyNoInteractions(template);
     }
     @Test void rejectsEventsWithoutId() {
-        var listener = new DomainEventListener(new ProcessedEvents(20), new EventRouter(mock(SimpMessagingTemplate.class), new ActiveServiceRegistry()));
+        var listener = new DomainEventListener(new ProcessedEvents(20), new EventRouter(mock(SimpMessagingTemplate.class), new ActiveServiceRegistry(), new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         assertThrows(AmqpRejectAndDontRequeueException.class,
                 () -> listener.handle(new EventEnvelope(null, "professional.online", 1, Instant.now(), null, null)));
     }

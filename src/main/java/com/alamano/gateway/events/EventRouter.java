@@ -2,6 +2,10 @@ package com.alamano.gateway.events;
 
 import com.alamano.gateway.services.ActiveServiceRegistry;
 import com.fasterxml.jackson.databind.JsonNode;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import java.time.Duration;
+import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -12,20 +16,37 @@ public class EventRouter {
     public static final String MAP_TOPIC = "/topic/map";
     public static final String SERVICE_TOPIC_PREFIX = "/topic/service.";
     public static final String PROFESSIONAL_SERVICES_QUEUE = "/queue/services";
+    /** HU-Q6/Q10: tiempo entre que el evento ocurrio en el Core y el Gateway lo reparte. */
+    public static final String EVENT_LATENCY_METRIC = "alamano.event.latency";
     private static final Logger log = LoggerFactory.getLogger(EventRouter.class);
     private final SimpMessagingTemplate messagingTemplate;
     private final ActiveServiceRegistry activeServices;
-    public EventRouter(SimpMessagingTemplate messagingTemplate, ActiveServiceRegistry activeServices) {
+    private final MeterRegistry meterRegistry;
+    public EventRouter(SimpMessagingTemplate messagingTemplate, ActiveServiceRegistry activeServices,
+            MeterRegistry meterRegistry) {
         this.messagingTemplate = messagingTemplate;
         this.activeServices = activeServices;
+        this.meterRegistry = meterRegistry;
     }
     public void route(EventEnvelope event) {
+        recordLatency(event);
         switch (event.type()) {
             case "professional.online", "professional.disconnected" -> messagingTemplate.convertAndSend(MAP_TOPIC, event);
             case "service.status.changed" -> applyServiceStatus(event);
             case "tracking.updated" -> routeTracking(event);
             default -> log.debug("Evento ignorado por el enrutador: {}", event.type());
         }
+    }
+
+    // Si los relojes van desfasados la resta puede dar negativa: se registra como cero.
+    private void recordLatency(EventEnvelope event) {
+        if (event.occurredAt() == null) return;
+        Duration latency = Duration.between(event.occurredAt(), Instant.now());
+        Timer.builder(EVENT_LATENCY_METRIC)
+                .tag("type", event.type())
+                .publishPercentileHistogram()
+                .register(meterRegistry)
+                .record(latency.isNegative() ? Duration.ZERO : latency);
     }
 
     // El cliente del servicio recibe el sobre completo (ubicación y ETA) en /topic/service.{serviceId}.

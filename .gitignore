@@ -35,3 +35,7 @@ build/
 ### Local ###
 .claude/settings.local.json
 Codex_Tarea318_Base_Gateway.md
+
+# Volcados de la JVM
+hs_err_pid*.log
+replay_pid*.log

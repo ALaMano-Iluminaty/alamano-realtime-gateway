@@ -17,7 +17,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 class EventRouterTest {
     private final SimpMessagingTemplate template = mock(SimpMessagingTemplate.class);
     private final ActiveServiceRegistry registry = new ActiveServiceRegistry();
-    private final EventRouter router = new EventRouter(template, registry);
+    private final EventRouter router = new EventRouter(template, registry, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
     @Test
     void newerServiceStatusChangedUpdatesRegistryAndSendsToServiceTopic() {

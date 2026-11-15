@@ -8,10 +8,15 @@ on:
 
 jobs:
   build:
-    name: Compilar y probar
+    name: Compilar, probar y SonarCloud
     runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # SonarCloud necesita el historial para distinguir el codigo nuevo del viejo.
+          fetch-depth: 0
 
       - uses: actions/setup-java@v4
         with:
@@ -20,8 +25,17 @@ jobs:
           cache: maven
 
       # Las pruebas usan spring-rabbit-test: no hace falta un RabbitMQ real.
+      # verify tambien corre JaCoCo: si la cobertura baja de 80 % el build falla aqui.
       - name: Maven verify
         run: ./mvnw -B verify
+
+      # HU-Q5: el analisis espera el Quality Gate (sonar.qualitygate.wait en el pom) y falla
+      # si no pasa, asi que con la rama protegida el PR no se puede integrar.
+      - name: SonarCloud
+        if: ${{ env.SONAR_TOKEN != '' }}
+        run: ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:5.8.0.7211:sonar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   image:
     name: Publicar imagen

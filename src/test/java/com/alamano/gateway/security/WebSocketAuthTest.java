@@ -125,4 +125,27 @@ class WebSocketAuthTest {
     }
     // Vencido 5 minutos: queda fuera de la tolerancia de reloj de 60 s de NimbusJwtDecoder.
     @Test void expiredTokenFails() { assertConnectRejected(token(Instant.now().minus(Duration.ofMinutes(5)), encoder)); }
+
+    // HU-Q2: un token con el payload cambiado (aquí el rol) conserva una firma que ya no corresponde.
+    @Test void tamperedTokenFails() {
+        String valid = token(Instant.now().plusSeconds(60), encoder);
+        String[] parts = valid.split("\\.");
+        String payload = new String(java.util.Base64.getUrlDecoder().decode(parts[1]), java.nio.charset.StandardCharsets.UTF_8)
+                .replace("\"role\":\"PROFESSIONAL\"", "\"role\":\"ADMIN\"");
+        String tampered = parts[0] + "." + java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)) + "." + parts[2];
+        assertConnectRejected(tampered);
+    }
+
+    @Test void malformedTokenFails() { assertConnectRejected("esto-no-es-un-jwt"); }
+
+    @Test void nonBearerAuthorizationFails() {
+        var headers = new StompHeaders(); headers.add("Authorization", "Basic dXN1YXJpbzpjbGF2ZQ==");
+        var exception = assertThrows(ExecutionException.class, () -> client.connectAsync("ws://localhost:" + port + "/ws",
+                (WebSocketHttpHeaders) null, headers, new StompSessionHandlerAdapter() {
+                    @Override public void handleFrame(StompHeaders h, Object payload) { errorFrame.set(h); }
+                }).get(5, TimeUnit.SECONDS));
+        assertInstanceOf(ConnectionLostException.class, exception.getCause());
+        assertNotNull(errorFrame.get());
+    }
 }

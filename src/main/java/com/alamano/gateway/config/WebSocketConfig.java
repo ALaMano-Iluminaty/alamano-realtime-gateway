@@ -20,6 +20,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private final JwtChannelInterceptor interceptor;
     private final DestinationAuthorizationInterceptor destinationAuthorizationInterceptor;
     private final CorrelationIdChannelInterceptor correlationIdInterceptor;
+    private final OriginRejectionHandshakeInterceptor originRejectionInterceptor;
     private final String[] allowedOrigins;
     private final TaskScheduler heartbeatScheduler;
 
@@ -28,18 +29,22 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public WebSocketConfig(JwtChannelInterceptor interceptor,
             DestinationAuthorizationInterceptor destinationAuthorizationInterceptor,
             CorrelationIdChannelInterceptor correlationIdInterceptor,
+            OriginRejectionHandshakeInterceptor originRejectionInterceptor,
             @Value("${alamano.gateway.allowed-origins}") String allowedOrigins,
             @Lazy @Qualifier("messageBrokerTaskScheduler") TaskScheduler heartbeatScheduler) {
         this.interceptor = interceptor;
         this.destinationAuthorizationInterceptor = destinationAuthorizationInterceptor;
         this.correlationIdInterceptor = correlationIdInterceptor;
+        this.originRejectionInterceptor = originRejectionInterceptor;
         this.allowedOrigins = Arrays.stream(allowedOrigins.split(",")).map(String::trim).toArray(String[]::new);
         this.heartbeatScheduler = heartbeatScheduler;
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/ws").setAllowedOriginPatterns(allowedOrigins);
+        registry.addEndpoint("/ws")
+                .setAllowedOriginPatterns(allowedOrigins)
+                .addInterceptors(originRejectionInterceptor);
     }
 
     @Override

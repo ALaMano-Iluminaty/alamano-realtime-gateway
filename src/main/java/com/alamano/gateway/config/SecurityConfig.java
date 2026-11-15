@@ -23,7 +23,13 @@ public class SecurityConfig {
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http.csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(auth -> auth.requestMatchers("/ws", "/ws/**", "/actuator/health", "/actuator/health/**")
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(
+                                "/ws", "/ws/**",
+                                "/actuator/health", "/actuator/health/**",
+                                "/actuator/info",
+                                "/actuator/metrics", "/actuator/metrics/**",
+                                "/actuator/prometheus")
                         .permitAll().anyRequest().denyAll()).build();
     }
 }
